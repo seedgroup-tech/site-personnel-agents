@@ -1,0 +1,62 @@
+name: chemins-sensibles
+
+# Controle des chemins sensibles (dossier AI TECH OFFICE v0.5, C16).
+# Echoue (croix rouge) si la proposition touche un fichier sensible,
+# ou si la liste des fichiers ne peut pas etre etablie (fail-closed).
+# pull_request_target : le controle utilise toujours la version de ce
+# fichier presente sur main, jamais celle de la proposition.
+# Aucun code de la proposition n'est telecharge ni execute.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  controle:
+    name: controle-chemins-sensibles
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verifier les fichiers modifies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ATTENDU: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -euo pipefail
+          shopt -s nocasematch
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" \
+            --jq '.[] | [.filename, (.previous_filename // "")] | @tsv' > fichiers.tsv
+          TROUVES=$(grep -c . fichiers.tsv || true)
+          if [ "$TROUVES" != "$ATTENDU" ]; then
+            echo "ECHEC : liste incomplete ($TROUVES fichiers lus sur $ATTENDU)."
+            exit 1
+          fi
+          SENSIBLE=0
+          verifier() {
+            f="$1"
+            [ -z "$f" ] && return 0
+            base="${f##*/}"
+            case "/$f" in
+              */.claude/*|*/.github/*|*/supabase/*|*/migrations/*)
+                echo "SENSIBLE : $f"; SENSIBLE=1; return 0 ;;
+            esac
+            case "$base" in
+              .mcp.json|claude.md|.env*|*.pem|*.key|package.json|package-lock.json|npm-shrinkwrap.json|yarn.lock|pnpm-lock.yaml|bun.lock|bun.lockb|wrangler.toml|wrangler.json|wrangler.jsonc|vercel.json|netlify.toml|_headers|_redirects)
+                echo "SENSIBLE : $f"; SENSIBLE=1 ;;
+            esac
+          }
+          while IFS=$'\t' read -r nom ancien; do
+            verifier "$nom"
+            verifier "$ancien"
+          done < fichiers.tsv
+          if [ "$SENSIBLE" -ne 0 ]; then
+            echo "ECHEC : chemin sensible modifie. Examen du proprietaire obligatoire."
+            exit 1
+          fi
+          echo "OK : aucun chemin sensible ($TROUVES fichiers verifies)."

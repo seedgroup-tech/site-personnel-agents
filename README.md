@@ -5,8 +5,7 @@ Site personnel (portfolio) de Yan FIMBA : une seule page statique, en français 
 ## Modifier le site
 
 - `index.html` : le contenu ; `assets/style.css` : le style ; `assets/langue.js` : la bascule FR/EN.
-- Les coordonnées de contact et les descriptions de projets marquées « à compléter » sont à remplacer par le propriétaire.
-- Un projet est présent dans `index.html` mais masqué (attribut `hidden`) en attendant l'accord de son porteur.
+- Les descriptions de projets marquées « à compléter » sont à remplacer par le propriétaire.
 
 ## Règle des paires FR/EN
 
