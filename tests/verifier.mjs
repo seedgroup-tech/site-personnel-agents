@@ -167,7 +167,8 @@ critere('CA-03', 'mêmes contenus FR/EN, EN masqués, FR visibles, paires adjace
     if (entre.trim() !== '') nonAdj++;
   }
   if (nonAdj) pb.push(`${nonAdj} paire(s) non adjacente(s)`);
-  inf.push(`${fr.length} fr / ${en.length} en, paires adjacentes`);
+  if (!/\[hidden\]\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/.test(css)) pb.push('règle CSS [hidden]{display:none !important} absente');
+  inf.push(`${fr.length} fr / ${en.length} en, paires adjacentes, règle CSS [hidden] présente`);
 });
 
 // ---------- CA-04 ----------
@@ -209,78 +210,85 @@ critere('CA-05', 'aucun form/input/textarea/select dans les fichiers HTML', (pb,
 });
 
 // ---------- CA-06 ----------
-critere('CA-06', 'lien mailto et lien wa.me avec « [à compléter] », aucune vraie coordonnée', (pb, inf) => {
-  const A = 'à compléter';
-  const liens = els.filter((e) => e.name === 'a' && e.attrs.href);
+critere('CA-06', 'contact réel : mailto, wa.me, textes FR/EN, aucune autre coordonnée', (pb, inf) => {
+  const MAIL = 'yanfimba@seedscaleup.com';
+  const WA = 'https://wa.me/237690406650';
+  const liens = els.filter((e) => e.name === 'a' && e.attrs.href !== undefined);
   const mail = liens.filter((e) => /^mailto:/i.test(e.attrs.href));
-  const wa = liens.filter((e) => /^https:\/\/wa\.me\//i.test(e.attrs.href));
-  if (mail.length !== 1) pb.push(`${mail.length} lien(s) mailto (1 attendu)`);
-  if (wa.length !== 1) pb.push(`${wa.length} lien(s) wa.me (1 attendu)`);
-  for (const l of [...mail, ...wa]) {
-    if (!l.attrs.href.includes('[' + A + ']')) pb.push('href sans [à compléter] : ' + l.attrs.href);
+  const wa = liens.filter((e) => /^https?:\/\/wa\.me\//i.test(e.attrs.href));
+  if (mail.length !== 1 || mail[0].attrs.href !== 'mailto:' + MAIL) pb.push(`mailto attendu 1× « mailto:${MAIL} », trouvé : ${mail.map((m) => m.attrs.href).join(' | ') || 'aucun'}`);
+  if (wa.length !== 1 || wa[0].attrs.href !== WA) pb.push(`wa.me attendu 1× « ${WA} », trouvé : ${wa.map((m) => m.attrs.href).join(' | ') || 'aucun'}`);
+  if (wa[0] && (wa[0].attrs.target !== '_blank' || !/\bnoopener\b/.test(wa[0].attrs.rel || '') || !/\bnoreferrer\b/.test(wa[0].attrs.rel || ''))) pb.push('wa.me sans target=_blank / rel noopener noreferrer');
+  const norm = (t) => t.replace(/\s+/g, ' ');
+  for (const [l, attendu] of [[mail[0], MAIL], [wa[0], '+237 690406650']]) {
+    if (!l) continue;
     for (const lang of ['fr', 'en']) {
-      const sp = els.find((e) => e.start >= l.innerStart && e.end <= l.innerEnd + 1 && e.attrs.lang === lang && !/sr-only/.test(e.attrs.class || '') && /E-?mail|WhatsApp/i.test(propre.slice(e.innerStart, e.innerEnd)));
-      if (!sp || !propre.slice(sp.innerStart, sp.innerEnd).includes('[' + A + ']')) pb.push(`texte ${lang} sans [à compléter] pour ${l.attrs.href.slice(0, 20)}`);
+      const sp = els.filter((e) => e.start >= l.innerStart && e.end <= l.innerEnd && e.attrs.lang === lang && !e.hiddenAnc && !/sr-only/.test(propre.slice(e.start, e.innerStart)));
+      if (!sp.some((e) => norm(texte(propre.slice(e.innerStart, e.innerEnd))).includes(attendu))) pb.push(`« ${attendu} » absent du texte ${lang}`);
     }
   }
-  const visible = texte(propre.slice(corps.debut, corps.fin));
-  if (/[\w.+-]+@[\w-]+\.[\w.-]+/.test(visible + ' ' + liens.map((l) => l.attrs.href).join(' '))) pb.push('adresse e-mail réelle détectée');
-  if (/wa\.me\/\+?\d/.test(propre)) pb.push('numéro wa.me réel détecté');
-  if (/(\+|00)\d[\d\s.()-]{7,}\d/.test(visible)) pb.push('numéro de téléphone détecté dans le texte');
-  if (/^mailto:[^\[]*\d{5,}/.test(mail[0] ? mail[0].attrs.href : '')) pb.push('chiffres dans mailto');
-  inf.push(`mailto=${mail[0] && mail[0].attrs.href} ; wa=${wa[0] && wa[0].attrs.href}`);
+  const mails = (propre.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || []);
+  const autres = mails.filter((m) => m.toLowerCase() !== MAIL);
+  if (autres.length) pb.push('autre(s) adresse(s) e-mail : ' + autres.join(', '));
+  for (const m of propre.matchAll(/\+?\d[\d\s]{6,}\d/g)) {
+    const n = m[0].replace(/[\s+]/g, '');
+    if (n.length >= 8 && n !== '237690406650') pb.push('autre suite de chiffres : ' + m[0].trim());
+  }
+  const sec = els.find((e) => e.name === 'section' && e.attrs.id === 'contact');
+  if (!sec) pb.push('section #contact absente');
+  else if (/à compléter/i.test(propre.slice(sec.start, sec.end))) pb.push('« à compléter » dans #contact');
+  inf.push(`mailto=${mail[0] && mail[0].attrs.href} ; wa=${wa[0] && wa[0].attrs.href} ; textes FR/EN vérifiés ; ${mails.length} adresse(s) e-mail dans index.html`);
 });
 
 // ---------- CA-07 ----------
 const cartes = els.filter((e) => e.name === 'li' && /\bcarte\b/.test(e.attrs.class || ''));
 const contenuCarte = (c) => propre.slice(c.start, c.end);
-critere('CA-07', '9 projets visibles avec descriptions FR/EN, badge, liens KLOQin et SeedScaleUp', (pb, inf) => {
-  const noms = ['KLOQin', 'SeedScaleUp', 'LPMP News', 'Prüfbereit', 'Doomee', 'Bilan Quotidien', 'Fioblo', 'Fimba', 'SeedGroup'];
-  for (const n of noms) {
-    const c = cartes.find((x) => {
-      const h3 = els.find((e) => e.name === 'h3' && e.start > x.start && e.end <= x.end);
-      return h3 && texte(propre.slice(h3.innerStart, h3.innerEnd)) === n;
-    });
-    if (!c) { pb.push(n + ' : carte absente'); continue; }
-    if (c.hiddenSelf || c.hiddenAnc) pb.push(n + ' : masquée');
-    const sub = els.filter((e) => e.start > c.start && e.end <= c.end && (e.attrs.lang === 'fr' || e.attrs.lang === 'en'));
-    const frp = sub.filter((e) => e.attrs.lang === 'fr' && !/sr-only|nouvel onglet/.test(propre.slice(e.innerStart, e.innerEnd)));
-    const enp = sub.filter((e) => e.attrs.lang === 'en');
-    if (!frp.length || !enp.length) pb.push(n + ' : description FR ou EN manquante');
+const nomCarte = (c) => { const h3 = els.find((e) => e.name === 'h3' && e.start > c.start && e.end <= c.end); return h3 ? texte(propre.slice(h3.innerStart, h3.innerEnd)) : ''; };
+critere('CA-07', '10 projets visibles dans l’ordre, descriptions exactes FR/EN, badges, liens', (pb, inf) => {
+  const A = 'Description à compléter par le propriétaire.';
+  const AE = 'Description to be completed by the owner.';
+  const attendu = [
+    ['KLOQin', 'Application de pointage des employés par QR code, utilisée par des entreprises au Cameroun.', 'Employee time-tracking app using QR codes, used by companies in Cameroon.', ['https://kloqin.com']],
+    ['SOLIDA', "Application de gestion de l'AMIDEFEM.", 'Management application for AMIDEFEM.', []],
+    ['SeedScaleUp', 'Agence 360° de marketing, de branding et de croissance, basée à Douala et Yaoundé.', '360° marketing, branding and growth agency based in Douala and Yaoundé.', ['https://www.seedscaleup.com']],
+    ['LPMP News', A, AE, []], ['Prüfbereit', A, AE, []], ['Doomee', A, AE, []], ['Bilan Quotidien', A, AE, []], ['Fioblo', A, AE, []],
+    ['Fimba', 'Logiciel de gestion de boutique.', 'Shop management software.', []],
+    ['SeedGroup', "Écosystème d'entreprises africaines, dont je suis le Responsable financier.", 'African business ecosystem, where I serve as Head of Finance.', []],
+  ];
+  const n = (t) => texte(t).replace(/[’‘]/g, "'");
+  const noms = cartes.map(nomCarte);
+  if (cartes.length !== attendu.length) pb.push(`${cartes.length} cartes (${attendu.length} attendues)`);
+  if (noms.join('|') !== attendu.map((x) => x[0]).join('|')) pb.push(`ordre/noms : ${noms.join(', ')}`);
+  cartes.forEach((c, i) => {
+    const nom = nomCarte(c);
+    if (c.hiddenSelf || c.hiddenAnc) pb.push(nom + ' : carte masquée');
+    const att = attendu.find((x) => x[0] === nom);
+    if (!att) return;
+    const ps = els.filter((e) => e.name === 'p' && e.start > c.start && e.end <= c.end && !/badge-ligne/.test(e.attrs.class || '') && !els.some((a) => a.name === 'a' && a.start > e.start && a.end <= e.end));
+    const desc = (lang) => ps.flatMap((p) => els.filter((e) => e.start > p.start && e.end <= p.end && e.attrs.lang === lang)).map((e) => n(propre.slice(e.innerStart, e.innerEnd)));
+    const fr = desc('fr'), en = desc('en');
+    if (fr.length !== 1 || fr[0] !== att[1]) pb.push(`${nom} : FR « ${fr.join(' / ')} » ≠ « ${att[1]} »`);
+    if (en.length !== 1 || en[0] !== att[2]) pb.push(`${nom} : EN « ${en.join(' / ')} » ≠ « ${att[2]} »`);
     const cc = contenuCarte(c);
-    if (!/lang="fr"[^>]*>\s*brouillon à valider/.test(cc)) pb.push(n + ' : badge FR absent');
-    if (!/lang="en"[^>]*>\s*draft to be validated/.test(cc)) pb.push(n + ' : badge EN absent');
-    // au moins une description (hors badge, lien) en FR et en EN
-    const descFr = frp.filter((e) => !/brouillon|Voir le site/.test(propre.slice(e.innerStart, e.innerEnd)));
-    const descEn = enp.filter((e) => !/draft to be|Visit website|opens in a new tab/.test(propre.slice(e.innerStart, e.innerEnd)));
-    if (!descFr.length || !descEn.length) pb.push(n + ' : texte de description absent');
-  }
-  const visibles = cartes.filter((c) => !c.hiddenSelf && !c.hiddenAnc);
-  if (visibles.length !== 9) pb.push(`${visibles.length} cartes visibles (9 attendues)`);
-  const liens = { KLOQin: 'https://kloqin.com', SeedScaleUp: 'https://www.seedscaleup.com' };
-  for (const [n, url] of Object.entries(liens)) {
-    const c = cartes.find((x) => /<h3[^>]*>\s*/.test(contenuCarte(x)) && texte(contenuCarte(x)).startsWith(n));
-    const a = c && els.find((e) => e.name === 'a' && e.start > c.start && e.end <= c.end);
-    if (!a || a.attrs.href !== url) pb.push(`${n} : lien ${url} attendu, trouvé ${a && a.attrs.href}`);
-  }
-  inf.push(`${visibles.length} cartes visibles`);
+    if (!/lang="fr"[^>]*>\s*brouillon à valider/.test(cc)) pb.push(nom + ' : badge FR absent');
+    if (!/lang="en"[^>]*>\s*draft to be validated/.test(cc)) pb.push(nom + ' : badge EN absent');
+    const hrefs = els.filter((e) => e.name === 'a' && e.start > c.start && e.end <= c.end).map((e) => e.attrs.href);
+    if (hrefs.join('|') !== att[3].join('|')) pb.push(`${nom} : liens [${hrefs.join(', ')}] ≠ [${att[3].join(', ')}]`);
+  });
+  inf.push(`${cartes.length} cartes visibles : ${noms.join(', ')}`);
 });
 
 // ---------- CA-08 ----------
-critere('CA-08', 'MotionFlow uniquement dans un élément hidden, aucun lien, règle CSS [hidden]', (pb, inf) => {
-  const reMF = /motionflow/gi;
-  const occ = [...propre.matchAll(reMF)];
-  if (!occ.length) pb.push('MotionFlow absent du code');
-  let dehors = 0;
-  for (const o of occ) {
-    const cache = els.some((e) => e.hiddenSelf && !VOIDS.has(e.name) && o.index >= e.innerStart && o.index < e.innerEnd);
-    if (!cache) dehors++;
+critere('CA-08', 'nom du projet retiré absent de tous les fichiers (suivis et non suivis) et noms de fichiers', (pb, inf) => {
+  const re = new RegExp(['Mo', 'tion'].join('') + '[\\s_-]*' + ['Fl', 'ow'].join(''), 'i');
+  const git = (args) => execFileSync('git', args, { cwd: RACINE, encoding: 'utf8' }).split('\n').filter(Boolean);
+  const liste = [...new Set([...git(['ls-files']), ...git(['ls-files', '--others', '--exclude-standard'])])];
+  for (const f of liste) {
+    let fautif = re.test(f);
+    if (!fautif && fs.existsSync(path.join(RACINE, f))) fautif = re.test(fs.readFileSync(path.join(RACINE, f)).toString('utf8'));
+    if (fautif) pb.push(f);
   }
-  if (dehors) pb.push(`${dehors} occurrence(s) hors élément hidden dans index.html`);
-  if (els.some((e) => (e.attrs.href || '').match(/motionflow/i))) pb.push('un href cible MotionFlow');
-  for (const f of ['assets/style.css', 'assets/langue.js']) if (/motionflow/i.test(lire(f))) pb.push('MotionFlow dans ' + f);
-  if (!/\[hidden\]\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/.test(css)) pb.push('règle CSS [hidden]{display:none !important} absente');
-  inf.push(`${occ.length} occurrence(s), toutes dans un élément hidden ; règle CSS présente`);
+  inf.push(`${liste.length} fichiers analysés (suivis + non suivis, y compris tests/verifier.mjs)`);
 });
 
 // ---------- CA-09 ----------
@@ -350,15 +358,19 @@ critere('CA-11', 'liens internes valides, alt sur les images, liens externes sû
 });
 
 // ---------- CA-12 ----------
-critere('CA-12', 'aucun chiffre ni mot interdit dans les cartes projets', (pb, inf) => {
-  const mots = [/\bclients?\b/i, /\bleaders?\b/i, /\bmillions?\b/i, /%/, /chiffres? d['’]affaires/i, /\butilisateurs?\b/i, /\busers?\b/i, /\bcustomers?\b/i];
+critere('CA-12', 'aucun nombre (hors « 360° ») ni mot interdit dans les cartes projets', (pb, inf) => {
+  const mots = [/\bclients?\b/i, /\bleaders?\b/i, /\bmillions?\b/i, /%/, /chiffres? d['’]affaires/i, /\butilisateurs?\b/i, /\busers?\b/i, /\bcustomers?\b/i,
+    /n°\s*1/i, /\bprimée?s?\b/i, /\brecords?\b/i, /\bbest\b/i, /\bawards?\b/i];
   for (const c of cartes) {
-    const t = texte(contenuCarte(c));
-    const nom = t.split(' ')[0];
-    if (/\d/.test(t)) pb.push(`${nom} : chiffre dans « ${t.match(/.{0,15}\d.{0,15}/)[0]} »`);
+    const nom = nomCarte(c);
+    const t = texte(contenuCarte(c)).replace(/360°/g, '');
+    const num = t.match(/.{0,15}\d.{0,15}/);
+    if (num) pb.push(`${nom} : nombre dans « ${num[0]} »`);
     for (const r of mots) if (r.test(t)) pb.push(`${nom} : mot interdit ${r}`);
+    // « entreprises » / « companies » : admis dans KLOQin ; SeedGroup l'emploie dans le texte imposé par CA-07 (voir rapport)
+    if (/\b(entreprises?|companies|company)\b/i.test(t) && !['KLOQin', 'SeedGroup'].includes(nom)) pb.push(`${nom} : « entreprises/companies » hors cartes admises`);
   }
-  inf.push(`${cartes.length} cartes analysées (MotionFlow masquée incluse)`);
+  inf.push(`${cartes.length} cartes analysées ; seul nombre admis : « 360° »`);
 });
 
 // ---------- rapport ----------
