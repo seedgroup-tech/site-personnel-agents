@@ -109,3 +109,5 @@ footer p { margin-bottom: .25rem; }
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
   html { scroll-behavior: auto; }
 }
+
+.pied-contacts a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: .25rem; color: var(--accent); font-weight: 700; }

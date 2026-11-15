@@ -5,7 +5,7 @@ Site personnel (portfolio) de Yan FIMBA : une seule page statique, en français 
 ## Modifier le site
 
 - `index.html` : le contenu ; `assets/style.css` : le style ; `assets/langue.js` : la bascule FR/EN.
-- Les descriptions de projets marquées « à compléter » sont à remplacer par le propriétaire.
+- Les fiches de projets portent le badge « brouillon à valider » tant que le propriétaire ne les a pas validées.
 
 ## Règle des paires FR/EN
 
