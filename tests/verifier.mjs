@@ -106,7 +106,7 @@ critere('CA-01', 'index.html à la racine, aucun chemin sensible, ressources ré
     /^CLAUDE\.md$/i, /^\.claude\//, /^\.github\//, /^\.mcp\.json$/, /(^|\/)\.env[^/]*$/,
     /\.pem$/i, /\.key$/i, /(^|\/)package\.json$/, /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|npm-shrinkwrap\.json)$/,
     /(^|\/)wrangler\.[^/]+$/, /(^|\/)vercel\.json$/, /(^|\/)netlify\.toml$/, /(^|\/)_headers$/, /(^|\/)_redirects$/,
-    /^supabase\//, /^migrations\//,
+    /^supabase\//, /^migrations\//, /^policies\//,
   ];
   const touches = diff.filter((f) => sensibles.some((r) => r.test(f)));
   if (touches.length) pb.push('chemins sensibles touchés : ' + touches.join(', '));
@@ -200,6 +200,10 @@ critere('CA-05', 'aucun form/input/textarea/select dans les fichiers HTML', (pb,
   for (const f of tous) {
     const found = sansCommentaires(lire(f)).match(/<\s*(form|input|textarea|select)\b/gi);
     if (found) pb.push(`${f} : ${found.join(', ')}`);
+    const sub = sansCommentaires(lire(f)).match(/<\s*button\b[^>]*\btype\s*=\s*["']?submit\b[^>]*>/gi);
+    if (sub) pb.push(`${f} : bouton submit`);
+    const sansType = sansCommentaires(lire(f)).match(/<\s*button\b(?![^>]*\btype\s*=)[^>]*>/gi);
+    if (sansType) pb.push(`${f} : button sans type (submit par défaut)`);
   }
   inf.push(`${tous.length} fichier(s) HTML analysé(s) : ${tous.join(', ')}`);
 });
@@ -304,6 +308,10 @@ critere('CA-10', 'aucune ressource externe, aucun appel réseau dans le JS', (pb
     if (['iframe', 'embed', 'object', 'form'].includes(e.name)) pb.push(`<${e.name}> présent`);
     if (e.name === 'script' && !e.attrs.src) pb.push('script en ligne');
     if (e.name === 'style') pb.push('<style> en ligne');
+    if (e.name === 'base') pb.push('<base> présent');
+    if (e.name === 'meta' && /^refresh$/i.test(e.attrs['http-equiv'] || '')) pb.push('<meta http-equiv="refresh"> présent');
+    for (const k of Object.keys(e.attrs)) if (/^on[a-z]+$/.test(k)) pb.push(`attribut ${k}= sur <${e.name}>`);
+    if ('style' in e.attrs) pb.push(`attribut style= sur <${e.name}>`);
     if (e.attrs.srcset && /(https?:)?\/\//.test(e.attrs.srcset)) pb.push('srcset externe');
   }
   for (const m of propre.matchAll(/url\(\s*["']?\s*(https?:)?\/\//gi)) pb.push('url() externe dans HTML');
