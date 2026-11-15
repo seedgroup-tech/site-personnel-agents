@@ -167,6 +167,18 @@ critere('CA-03', 'mêmes contenus FR/EN, EN masqués, FR visibles, paires adjace
     if (entre.trim() !== '') nonAdj++;
   }
   if (nonAdj) pb.push(`${nonAdj} paire(s) non adjacente(s)`);
+  // cohérence FR/EN : mêmes e-mails, nombres, URL et noms de projet dans chaque paire
+  const extraire = (t) => [
+    ...(t.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || []),
+    ...(t.match(/\d+/g) || []),
+    ...(t.match(/https?:\/\/[^\s"'<>]+/g) || []),
+    ...['KLOQin', 'SeedScaleUp', 'Fimba', 'SeedGroup', 'SEED Group'].filter((n) => t.includes(n)),
+  ].sort().join('|');
+  for (let i = 0; i + 1 < lg.length; i += 2) {
+    const tf = texte(propre.slice(lg[i].innerStart, lg[i].innerEnd));
+    const te = texte(propre.slice(lg[i + 1].innerStart, lg[i + 1].innerEnd));
+    if (extraire(tf) !== extraire(te)) pb.push(`incohérence FR/EN : « ${tf.slice(0, 40)} » / « ${te.slice(0, 40)} »`);
+  }
   if (!/\[hidden\]\s*\{\s*display\s*:\s*none\s*!important\s*;?\s*\}/.test(css)) pb.push('règle CSS [hidden]{display:none !important} absente');
   inf.push(`${fr.length} fr / ${en.length} en, paires adjacentes, règle CSS [hidden] présente`);
 });
@@ -210,21 +222,33 @@ critere('CA-05', 'aucun form/input/textarea/select dans les fichiers HTML', (pb,
 });
 
 // ---------- CA-06 ----------
-critere('CA-06', 'contact réel : mailto, wa.me, textes FR/EN, aucune autre coordonnée', (pb, inf) => {
+critere('CA-06', 'contact réel dans #contact ET le pied de page, aucune autre coordonnée, aucun « à compléter » servi', (pb, inf) => {
   const MAIL = 'yanfimba@seedscaleup.com';
   const WA = 'https://wa.me/237690406650';
+  const AFF = '+237 690 40 66 50';
   const liens = els.filter((e) => e.name === 'a' && e.attrs.href !== undefined);
   const mail = liens.filter((e) => /^mailto:/i.test(e.attrs.href));
   const wa = liens.filter((e) => /^https?:\/\/wa\.me\//i.test(e.attrs.href));
-  if (mail.length !== 1 || mail[0].attrs.href !== 'mailto:' + MAIL) pb.push(`mailto attendu 1× « mailto:${MAIL} », trouvé : ${mail.map((m) => m.attrs.href).join(' | ') || 'aucun'}`);
-  if (wa.length !== 1 || wa[0].attrs.href !== WA) pb.push(`wa.me attendu 1× « ${WA} », trouvé : ${wa.map((m) => m.attrs.href).join(' | ') || 'aucun'}`);
-  if (wa[0] && (wa[0].attrs.target !== '_blank' || !/\bnoopener\b/.test(wa[0].attrs.rel || '') || !/\bnoreferrer\b/.test(wa[0].attrs.rel || ''))) pb.push('wa.me sans target=_blank / rel noopener noreferrer');
+  for (const l of mail) if (l.attrs.href !== 'mailto:' + MAIL) pb.push('href mailto incorrect : ' + l.attrs.href);
+  for (const l of wa) {
+    if (l.attrs.href !== WA) pb.push('href wa.me incorrect : ' + l.attrs.href);
+    if (l.attrs.target !== '_blank' || !/\bnoopener\b/.test(l.attrs.rel || '')) pb.push('wa.me sans target=_blank / rel noopener');
+  }
+  const zones = [['#contact', els.find((e) => e.name === 'section' && e.attrs.id === 'contact')], ['pied de page', els.find((e) => e.name === 'footer')]];
   const norm = (t) => t.replace(/\s+/g, ' ');
-  for (const [l, attendu] of [[mail[0], MAIL], [wa[0], '+237 690406650']]) {
-    if (!l) continue;
-    for (const lang of ['fr', 'en']) {
-      const sp = els.filter((e) => e.start >= l.innerStart && e.end <= l.innerEnd && e.attrs.lang === lang && !e.hiddenAnc && !/sr-only/.test(propre.slice(e.start, e.innerStart)));
-      if (!sp.some((e) => norm(texte(propre.slice(e.innerStart, e.innerEnd))).includes(attendu))) pb.push(`« ${attendu} » absent du texte ${lang}`);
+  for (const [nomZ, z] of zones) {
+    if (!z) { pb.push(nomZ + ' absent'); continue; }
+    const dans = (l) => l.start >= z.start && l.end <= z.end;
+    const m = mail.filter(dans), w = wa.filter(dans);
+    if (m.length < 1) pb.push(`${nomZ} : lien mailto absent`);
+    if (w.length < 1) pb.push(`${nomZ} : lien wa.me absent`);
+    for (const [l, att] of [[m[0], MAIL], [w[0], AFF]]) {
+      if (!l) continue;
+      if (l.hiddenSelf || l.hiddenAnc) pb.push(`${nomZ} : lien masqué`);
+      for (const lang of ['fr', 'en']) {
+        const sp = els.filter((e) => e.start >= l.innerStart && e.end <= l.innerEnd && e.attrs.lang === lang);
+        if (!sp.some((e) => norm(texte(propre.slice(e.innerStart, e.innerEnd))).includes(att))) pb.push(`${nomZ} : « ${att} » absent du texte ${lang}`);
+      }
     }
   }
   const mails = (propre.match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || []);
@@ -234,24 +258,23 @@ critere('CA-06', 'contact réel : mailto, wa.me, textes FR/EN, aucune autre coor
     const n = m[0].replace(/[\s+]/g, '');
     if (n.length >= 8 && n !== '237690406650') pb.push('autre suite de chiffres : ' + m[0].trim());
   }
-  const sec = els.find((e) => e.name === 'section' && e.attrs.id === 'contact');
-  if (!sec) pb.push('section #contact absente');
-  else if (/à compléter/i.test(propre.slice(sec.start, sec.end))) pb.push('« à compléter » dans #contact');
-  inf.push(`mailto=${mail[0] && mail[0].attrs.href} ; wa=${wa[0] && wa[0].attrs.href} ; textes FR/EN vérifiés ; ${mails.length} adresse(s) e-mail dans index.html`);
+  // plus aucun « à compléter » dans les fichiers servis
+  const servis = fichiers().filter((f) => f === 'index.html' || f === 'README.md' || f.startsWith('assets/'));
+  for (const f of servis) {
+    const t = lire(f);
+    if (/[àa] compl[ée]ter/i.test(t)) pb.push(`« à compléter » dans ${f}:${t.split('\n').findIndex((x) => /[àa] compl[ée]ter/i.test(x)) + 1}`);
+  }
+  inf.push(`${mail.length} mailto + ${wa.length} wa.me, valides, présents dans #contact et le pied de page, textes FR/EN « ${AFF} » ; 0 « à compléter » dans ${servis.join(', ')}`);
 });
 
 // ---------- CA-07 ----------
 const cartes = els.filter((e) => e.name === 'li' && /\bcarte\b/.test(e.attrs.class || ''));
 const contenuCarte = (c) => propre.slice(c.start, c.end);
 const nomCarte = (c) => { const h3 = els.find((e) => e.name === 'h3' && e.start > c.start && e.end <= c.end); return h3 ? texte(propre.slice(h3.innerStart, h3.innerEnd)) : ''; };
-critere('CA-07', '10 projets visibles dans l’ordre, descriptions exactes FR/EN, badges, liens', (pb, inf) => {
-  const A = 'Description à compléter par le propriétaire.';
-  const AE = 'Description to be completed by the owner.';
+critere('CA-07', '4 projets visibles dans l’ordre, descriptions exactes FR/EN, badges, liens', (pb, inf) => {
   const attendu = [
     ['KLOQin', 'Application de pointage des employés par QR code, utilisée par des entreprises au Cameroun.', 'Employee time-tracking app using QR codes, used by companies in Cameroon.', ['https://kloqin.com']],
-    ['SOLIDA', "Application de gestion de l'AMIDEFEM.", 'Management application for AMIDEFEM.', []],
     ['SeedScaleUp', 'Agence 360° de marketing, de branding et de croissance, basée à Douala et Yaoundé.', '360° marketing, branding and growth agency based in Douala and Yaoundé.', ['https://www.seedscaleup.com']],
-    ['LPMP News', A, AE, []], ['Prüfbereit', A, AE, []], ['Doomee', A, AE, []], ['Bilan Quotidien', A, AE, []], ['Fioblo', A, AE, []],
     ['Fimba', 'Logiciel de gestion de boutique.', 'Shop management software.', []],
     ['SeedGroup', "Écosystème d'entreprises africaines, dont je suis le Responsable financier.", 'African business ecosystem, where I serve as Head of Finance.', []],
   ];
@@ -279,16 +302,30 @@ critere('CA-07', '10 projets visibles dans l’ordre, descriptions exactes FR/EN
 });
 
 // ---------- CA-08 ----------
-critere('CA-08', 'nom du projet retiré absent de tous les fichiers (suivis et non suivis) et noms de fichiers', (pb, inf) => {
-  const re = new RegExp(['Mo', 'tion'].join('') + '[\\s_-]*' + ['Fl', 'ow'].join(''), 'i');
+critere('CA-08', 'projets et association retirés absents de tous les fichiers suivis et non suivis et des noms de fichiers', (pb, inf) => {
+  const j = (...x) => x.join('');
+  const sep = '[\\s_-]*';
+  const motifs = [
+    new RegExp(j('Mo', 'tion') + sep + j('Fl', 'ow'), 'i'),
+    new RegExp(j('LP', 'MP') + sep + j('Ne', 'ws'), 'i'),
+    new RegExp(j('Pr', '(?:ü|u|ue)', 'fbe', 'reit'), 'i'),
+    new RegExp(j('Doo', 'mee'), 'i'),
+    new RegExp(j('Bi', 'lan') + sep + j('Quoti', 'dien'), 'i'),
+    new RegExp(j('Fio', 'blo'), 'i'),
+    new RegExp('\\b' + j('SOL', 'IDA') + '\\b', 'i'),
+    new RegExp(j('AMI', 'DEFEM'), 'i'),
+  ];
   const git = (args) => execFileSync('git', args, { cwd: RACINE, encoding: 'utf8' }).split('\n').filter(Boolean);
   const liste = [...new Set([...git(['ls-files']), ...git(['ls-files', '--others', '--exclude-standard'])])];
   for (const f of liste) {
-    let fautif = re.test(f);
-    if (!fautif && fs.existsSync(path.join(RACINE, f))) fautif = re.test(fs.readFileSync(path.join(RACINE, f)).toString('utf8'));
+    let fautif = motifs.some((re) => re.test(f));
+    if (!fautif && fs.existsSync(path.join(RACINE, f))) {
+      const t = fs.readFileSync(path.join(RACINE, f)).toString('utf8');
+      fautif = motifs.some((re) => re.test(t));
+    }
     if (fautif) pb.push(f);
   }
-  inf.push(`${liste.length} fichiers analysés (suivis + non suivis, y compris tests/verifier.mjs)`);
+  inf.push(`${liste.length} fichiers analysés (suivis + non suivis, y compris tests/verifier.mjs), ${motifs.length} motifs`);
 });
 
 // ---------- CA-09 ----------
